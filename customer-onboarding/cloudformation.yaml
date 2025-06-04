@@ -1,0 +1,85 @@
+  AWSTemplateFormatVersion: '2010-09-09'
+  Description: Lambda Cold Start SaaS - Log Subscription Deployer
+
+  Parameters:
+    DestinationArn:
+      Type: String
+      Description: "ARN of your SaaS API Gateway endpoint (Destination)"
+    ForwarderRoleArn:
+      Type: String
+      Description: "ARN of an IAM role in this account allowing logs:PutSubscriptionFilter to the DestinationArn"
+
+  Resources:
+    DeployerFunction:
+      Type: AWS::Lambda::Function
+      Properties:
+        Handler: index.handler
+        Runtime: nodejs18.x
+        Timeout: 300
+        Role: !GetAtt DeployerLambdaExecutionRole.Arn
+        Code:
+          S3Bucket: cpaas-dev-inventory
+          S3Key: deployer-lambda.zip
+
+        Environment:
+          Variables:
+            DESTINATION_ARN: !Ref DestinationArn
+            FORWARDER_ROLE_ARN: !Ref ForwarderRoleArn
+
+    DeployerLambdaExecutionRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: lambda.amazonaws.com
+              Action: sts:AssumeRole
+        Policies:
+          - PolicyName: LogSubscriptionDeployerPolicy
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - logs:DescribeLogGroups
+                    - logs:DescribeSubscriptionFilters
+                    - logs:PutSubscriptionFilter
+                  Resource: "*"
+                - Effect: Allow
+                  Action:
+                    - logs:PutLogEvents
+                  Resource: "*"
+
+    LogGroupCreatedRule:
+      Type: AWS::Events::Rule
+      Properties:
+        EventPattern:
+          source:
+            - aws.logs
+          detail-type:
+            - AWS API Call via CloudTrail
+          detail:
+            eventSource:
+              - logs.amazonaws.com
+            eventName:
+              - CreateLogGroup
+        Targets:
+          - Arn: !GetAtt DeployerFunction.Arn
+            Id: DeployerFunctionTarget
+
+    LambdaInvokePermission:
+      Type: AWS::Lambda::Permission
+      Properties:
+        FunctionName: !Ref DeployerFunction
+        Action: 'lambda:InvokeFunction'
+        Principal: events.amazonaws.com
+        SourceArn: !GetAtt LogGroupCreatedRule.Arn
+
+  Outputs:
+    DeployerFunctionArn:
+      Value: !GetAtt DeployerFunction.Arn
+      Export:
+        Name: DeployerFunctionArn
+
