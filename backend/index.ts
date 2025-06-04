@@ -5,20 +5,41 @@ const ddb = new DynamoDB.DocumentClient();
 const TABLE_NAME = process.env.TABLE_NAME!;
 
 export async function handler(event: any, context: Context) {
-  try {
-    const { body } = event;
-    let logEvent;
-    if (body) {
-      logEvent = JSON.parse(body);
-    } else {
-      logEvent = event; // fallback
-    }
+  // For API Gateway proxy integration, event.httpMethod is set
+  if (event.httpMethod === 'GET') {
+    // Get current user's sub/tenant from Cognito claims
+    const claims = event.requestContext?.authorizer?.claims;
+    const tenantId = claims?.sub || 'demo-tenant'; // You may want to change this logic
 
-    // Store the log event with a timestamp
+    // Optionally: parse query params (e.g. for filtering, pagination)
+    const params = {
+      TableName: TABLE_NAME,
+      KeyConditionExpression: 'tenantId = :tenantId',
+      ExpressionAttributeValues: {
+        ':tenantId': tenantId,
+      },
+      ScanIndexForward: false, // newest first
+      Limit: 20,
+    };
+
+    const data = await ddb.query(params).promise();
+    return {
+      statusCode: 200,
+      body: JSON.stringify(data.Items || []),
+      headers: { 'Content-Type': 'application/json' },
+    };
+  }
+
+  // POST: Store event
+  if (event.httpMethod === 'POST') {
+    let logEvent = event.body ? JSON.parse(event.body) : event;
+    const claims = event.requestContext?.authorizer?.claims;
+    const tenantId = claims?.sub || 'demo-tenant';
+
     await ddb.put({
       TableName: TABLE_NAME,
       Item: {
-        tenantId: logEvent.tenantId || 'demo-tenant', // In real use, parse out the actual tenant/account ID
+        tenantId: tenantId,
         timestamp: Date.now(),
         event: logEvent,
       },
@@ -28,10 +49,12 @@ export async function handler(event: any, context: Context) {
       statusCode: 200,
       body: JSON.stringify({ success: true }),
     };
-  } catch (err) {
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: (err as Error).message }),
-    };
   }
+
+  // Default fallback
+  return {
+    statusCode: 405,
+    body: JSON.stringify({ error: 'Method not allowed' }),
+  };
 }
+

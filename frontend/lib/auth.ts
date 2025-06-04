@@ -15,3 +15,10 @@ export function getCurrentUserSession(): Promise<any | null> {
     });
   });
 }
+
+// New function to get JWT token
+export async function getAccessToken(): Promise<string | null> {
+  const session = await getCurrentUserSession();
+  return session ? session.getAccessToken().getJwtToken() : null;
+}
+

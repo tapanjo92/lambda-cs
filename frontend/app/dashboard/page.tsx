@@ -2,22 +2,52 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getCurrentUserSession } from '../../lib/auth';
+import { getCurrentUserSession, getAccessToken } from '../../lib/auth';
 import { userPool } from '../../lib/cognito';
 
 export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<any[]>([]);
   const router = useRouter();
 
   useEffect(() => {
+    // Check if user is authenticated and fetch data
     getCurrentUserSession().then(session => {
       if (!session) {
         router.replace('/login');
       } else {
-        setLoading(false);
+        fetchEvents();
       }
     });
+    // eslint-disable-next-line
   }, [router]);
+
+  const fetchEvents = async () => {
+    setLoading(true);
+    const token = await getAccessToken();
+    if (!token) {
+      router.replace('/login');
+      return;
+    }
+    try {
+      // Replace with your actual API Gateway endpoint (from CDK output)
+      const response = await fetch('https://ti7cqgksr2.execute-api.ap-south-1.amazonaws.com/prod/ingest', {
+        method: 'GET',
+        headers: {
+          Authorization: token
+        }
+      });
+      if (response.ok) {
+        const items = await response.json();
+        setData(items);
+      } else {
+        setData([]);
+      }
+    } catch (err) {
+      setData([]);
+    }
+    setLoading(false);
+  };
 
   const handleLogout = () => {
     const user = userPool.getCurrentUser();
@@ -30,10 +60,6 @@ export default function DashboardPage() {
   if (loading) {
     return <div className="p-8 text-center">Loading...</div>;
   }
-
-  const data = [
-    { timestamp: '2024-06-04 13:05', tenant: 'demo-tenant', details: 'Sample cold start event' }
-  ];
 
   return (
     <div className="min-h-screen bg-gray-50 p-8">
@@ -49,18 +75,20 @@ export default function DashboardPage() {
           <thead>
             <tr>
               <th className="border-b p-2">Timestamp</th>
-              <th className="border-b p-2">Tenant</th>
               <th className="border-b p-2">Details</th>
             </tr>
           </thead>
           <tbody>
-            {data.map((row, i) => (
+            {data.length > 0 ? data.map((row, i) => (
               <tr key={i}>
-                <td className="border-b p-2">{row.timestamp}</td>
-                <td className="border-b p-2">{row.tenant}</td>
-                <td className="border-b p-2">{row.details}</td>
+                <td className="border-b p-2">{new Date(row.timestamp).toLocaleString()}</td>
+                <td className="border-b p-2">{JSON.stringify(row.event)}</td>
               </tr>
-            ))}
+            )) : (
+              <tr>
+                <td colSpan={2} className="text-center py-4 text-gray-500">No events found.</td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
